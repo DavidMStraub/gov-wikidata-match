@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GOV ↔ Wikidata Candidates</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 14px/1.5 system-ui, sans-serif; background: #f5f5f5; color: #222; }
+
+  header { background: #1a1a2e; color: #eee; padding: 1rem 1.5rem; display: flex; align-items: center; gap: 1.5rem; }
+  header h1 { font-size: 1.1rem; font-weight: 600; }
+
+  #controls { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; padding: 0.75rem 1.5rem; background: #fff; border-bottom: 1px solid #ddd; }
+  #controls label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: #555; }
+  #controls input[type=file] { font-size: 0.85rem; }
+  #controls input[type=range] { width: 120px; }
+  #scoreVal { font-weight: 600; min-width: 2.5rem; }
+  #stats { font-size: 0.8rem; color: #888; margin-left: auto; }
+
+  .wrap { padding: 1rem 1.5rem; overflow-x: auto; }
+
+  table { border-collapse: collapse; width: 100%; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  th { background: #1a1a2e; color: #ddd; text-align: left; padding: 0.6rem 0.8rem; font-size: 0.78rem; font-weight: 600; letter-spacing: .03em; cursor: pointer; user-select: none; white-space: nowrap; }
+  th:hover { background: #2a2a4e; }
+  th.asc::after  { content: " ▲"; }
+  th.desc::after { content: " ▼"; }
+  td { padding: 0.5rem 0.8rem; border-bottom: 1px solid #f0f0f0; vertical-align: top; font-size: 0.83rem; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #fafafa; }
+
+  a { color: #2563eb; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .score { font-weight: 700; border-radius: 4px; padding: 1px 6px; font-size: 0.8rem; }
+  .score-hi  { background: #dcfce7; color: #166534; }
+  .score-mid { background: #fef9c3; color: #854d0e; }
+  .score-lo  { background: #fee2e2; color: #991b1b; }
+
+  .dist { color: #888; font-size: 0.78rem; }
+  .types { color: #666; font-size: 0.78rem; }
+  .gov-name { font-weight: 500; }
+  .empty { text-align: center; padding: 3rem; color: #aaa; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>GOV ↔ Wikidata Candidates</h1>
+</header>
+
+<div id="controls">
+  <label>JSON file: <input type="file" id="fileInput" accept=".json"></label>
+  <label>Min score:
+    <input type="range" id="minScore" min="0" max="1" step="0.05" value="0">
+    <span id="scoreVal">0.00</span>
+  </label>
+  <div id="stats"></div>
+</div>
+
+<div class="wrap">
+  <table>
+    <thead>
+      <tr>
+        <th data-col="gov_id">GOV ID</th>
+        <th data-col="gov_name">GOV Name</th>
+        <th data-col="qid">Wikidata Item</th>
+        <th data-col="type_labels">WD Types</th>
+        <th data-col="score">Score</th>
+        <th data-col="distance_m">Distance</th>
+      </tr>
+    </thead>
+    <tbody id="tbody">
+      <tr><td colspan="6" class="empty">Load a JSON file to begin.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+  let rows = [];
+  let sortCol = "score";
+  let sortDir = -1; // -1 = desc
+
+  const tbody   = document.getElementById("tbody");
+  const stats   = document.getElementById("stats");
+  const slider  = document.getElementById("minScore");
+  const scoreV  = document.getElementById("scoreVal");
+
+  document.getElementById("fileInput").addEventListener("change", e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const data = JSON.parse(ev.target.result);
+      rows = [];
+      for (const entry of data) {
+        for (const c of entry.candidates) {
+          rows.push({
+            gov_id:      entry.gov_id,
+            gov_name:    entry.gov_names.join("; "),
+            gov_types:   entry.gov_types,
+            gov_lat:     entry.gov_lat,
+            gov_lon:     entry.gov_lon,
+            qid:         c.qid,
+            label:       c.label,
+            type_labels: (c.type_labels || []).join(", "),
+            score:       c.score ?? 0,
+            distance_m:  c.distance_m,
+          });
+        }
+      }
+      render();
+    };
+    reader.readAsText(f);
+  });
+
+  slider.addEventListener("input", () => {
+    scoreV.textContent = parseFloat(slider.value).toFixed(2);
+    render();
+  });
+
+  document.querySelectorAll("th[data-col]").forEach(th => {
+    th.addEventListener("click", () => {
+      const col = th.dataset.col;
+      if (sortCol === col) sortDir *= -1;
+      else { sortCol = col; sortDir = col === "score" ? -1 : 1; }
+      document.querySelectorAll("th").forEach(t => t.classList.remove("asc", "desc"));
+      th.classList.add(sortDir === 1 ? "asc" : "desc");
+      render();
+    });
+  });
+
+  function render() {
+    const minScore = parseFloat(slider.value);
+
+    // Group rows by GOV id, filter candidates by score
+    const groupMap = new Map();
+    for (const r of rows) {
+      if (!groupMap.has(r.gov_id)) groupMap.set(r.gov_id, { meta: r, cands: [] });
+      if (r.score >= minScore) groupMap.get(r.gov_id).cands.push(r);
+    }
+    // Keep groups that still have at least one candidate after filtering
+    let groups = [...groupMap.values()].filter(g => g.cands.length > 0);
+
+    // Sort candidates within each group by score desc always
+    groups.forEach(g => g.cands.sort((a, b) => b.score - a.score));
+
+    // Group sort: use sensible representative value per column
+    function groupVal(g) {
+      switch (sortCol) {
+        case "score":       return Math.max(...g.cands.map(c => c.score));
+        case "distance_m":  return Math.min(...g.cands.map(c => c.distance_m));
+        case "gov_id":      return g.meta.gov_id;
+        case "gov_name":    return g.meta.gov_name;
+        default:            return g.cands[0][sortCol] ?? ""; // WD columns: top candidate
+      }
+    }
+    groups.sort((a, b) => {
+      const va = groupVal(a), vb = groupVal(b);
+      return typeof va === "number"
+        ? sortDir * (va - vb)
+        : sortDir * String(va).localeCompare(String(vb));
+    });
+
+    const totalCands = groups.reduce((n, g) => n + g.cands.length, 0);
+    stats.textContent = `${totalCands} candidate${totalCands !== 1 ? "s" : ""} from ${groups.length} GOV objects`;
+
+    if (groups.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="empty">No candidates match the current filter.</td></tr>`;
+      return;
+    }
+
+    const htmlParts = [];
+    groups.forEach((g, gi) => {
+      const shade = gi % 2 === 0 ? "" : " style='background:#f8f8ff'";
+      const govUrl = `https://gov.genealogy.net/item/show/${g.meta.gov_id}`;
+      const multi  = g.cands.length > 1;
+
+      g.cands.forEach((r, ci) => {
+        const sc     = r.score >= 0.7 ? "score-hi" : r.score >= 0.5 ? "score-mid" : "score-lo";
+        const wdUrl  = `https://www.wikidata.org/wiki/${r.qid}`;
+        const border = ci === 0 && gi > 0 ? " style='border-top:2px solid #d0d0e8'" : "";
+
+        if (ci === 0) {
+          // First candidate row: GOV cells with rowspan
+          const badge = multi ? ` <span style='font-size:.7rem;background:#e0e7ff;color:#3730a3;border-radius:3px;padding:1px 5px'>${g.cands.length}</span>` : "";
+          htmlParts.push(`<tr${shade}>
+            <td rowspan="${g.cands.length}"${border}><a href="${govUrl}" target="_blank">${r.gov_id}</a></td>
+            <td rowspan="${g.cands.length}" class="gov-name"${border}>${esc(r.gov_name)}${badge}</td>
+            <td><a href="${wdUrl}" target="_blank">${r.qid}</a> ${esc(r.label)}</td>
+            <td class="types">${esc(r.type_labels)}</td>
+            <td><span class="score ${sc}">${r.score.toFixed(3)}</span></td>
+            <td class="dist">${r.distance_m} m</td>
+          </tr>`);
+        } else {
+          // Subsequent candidate rows: only WD columns
+          htmlParts.push(`<tr${shade}>
+            <td><a href="${wdUrl}" target="_blank">${r.qid}</a> ${esc(r.label)}</td>
+            <td class="types">${esc(r.type_labels)}</td>
+            <td><span class="score ${sc}">${r.score.toFixed(3)}</span></td>
+            <td class="dist">${r.distance_m} m</td>
+          </tr>`);
+        }
+      });
+    });
+
+    tbody.innerHTML = htmlParts.join("");
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+</script>
+</body>
+</html>

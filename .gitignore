@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Output data (large, machine-generated)
+data/
+
+# Downloaded API spec
+openapi.json
