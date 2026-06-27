@@ -40,6 +40,12 @@
   .types { color: #666; font-size: 0.78rem; }
   .gov-name { font-weight: 500; }
   .empty { text-align: center; padding: 3rem; color: #aaa; }
+
+  #pagination { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1.5rem; font-size: 0.85rem; color: #555; }
+  #pagination button { padding: 0.3rem 0.8rem; border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; font-size: 0.85rem; }
+  #pagination button:disabled { opacity: 0.4; cursor: default; }
+  #pagination button:not(:disabled):hover { background: #f0f0f0; }
+  #pageInfo { color: #888; }
 </style>
 </head>
 <body>
@@ -75,15 +81,30 @@
   </table>
 </div>
 
+<div id="pagination">
+  <button id="btnPrev">← Prev</button>
+  <span id="pageInfo"></span>
+  <button id="btnNext">Next →</button>
+</div>
+
 <script>
+  const PAGE_SIZE = 200;
+
   let rows = [];
   let sortCol = "score";
   let sortDir = -1; // -1 = desc
+  let currentPage = 0;
 
   const tbody   = document.getElementById("tbody");
   const stats   = document.getElementById("stats");
   const slider  = document.getElementById("minScore");
   const scoreV  = document.getElementById("scoreVal");
+  const btnPrev = document.getElementById("btnPrev");
+  const btnNext = document.getElementById("btnNext");
+  const pageInfo = document.getElementById("pageInfo");
+
+  btnPrev.addEventListener("click", () => { currentPage--; render(); });
+  btnNext.addEventListener("click", () => { currentPage++; render(); });
 
   document.getElementById("fileInput").addEventListener("change", e => {
     const f = e.target.files[0];
@@ -108,6 +129,7 @@
           });
         }
       }
+      currentPage = 0;
       render();
     };
     reader.readAsText(f);
@@ -115,6 +137,7 @@
 
   slider.addEventListener("input", () => {
     scoreV.textContent = parseFloat(slider.value).toFixed(2);
+    currentPage = 0;
     render();
   });
 
@@ -125,6 +148,7 @@
       else { sortCol = col; sortDir = col === "score" ? -1 : 1; }
       document.querySelectorAll("th").forEach(t => t.classList.remove("asc", "desc"));
       th.classList.add(sortDir === 1 ? "asc" : "desc");
+      currentPage = 0;
       render();
     });
   });
@@ -144,25 +168,38 @@
     // Sort candidates within each group by score desc always
     groups.forEach(g => g.cands.sort((a, b) => b.score - a.score));
 
-    // Group sort: use sensible representative value per column
-    function groupVal(g) {
+    // Precompute sort key once per group, then sort
+    function groupSortKey(g) {
       switch (sortCol) {
         case "score":       return Math.max(...g.cands.map(c => c.score));
         case "distance_m":  return Math.min(...g.cands.map(c => c.distance_m));
         case "gov_id":      return g.meta.gov_id;
         case "gov_name":    return g.meta.gov_name;
-        default:            return g.cands[0][sortCol] ?? ""; // WD columns: top candidate
+        default:            return g.cands[0][sortCol] ?? "";
       }
     }
+    groups.forEach(g => { g._key = groupSortKey(g); });
     groups.sort((a, b) => {
-      const va = groupVal(a), vb = groupVal(b);
+      const va = a._key, vb = b._key;
       return typeof va === "number"
         ? sortDir * (va - vb)
         : sortDir * String(va).localeCompare(String(vb));
     });
 
-    const totalCands = groups.reduce((n, g) => n + g.cands.length, 0);
-    stats.textContent = `${totalCands} candidate${totalCands !== 1 ? "s" : ""} from ${groups.length} GOV objects`;
+    const totalGroups = groups.length;
+    const totalCands  = groups.reduce((n, g) => n + g.cands.length, 0);
+    stats.textContent = `${totalCands} candidate${totalCands !== 1 ? "s" : ""} from ${totalGroups} GOV objects`;
+
+    const totalPages = Math.max(1, Math.ceil(totalGroups / PAGE_SIZE));
+    currentPage = Math.min(currentPage, totalPages - 1);
+    const pageStart = currentPage * PAGE_SIZE;
+    const pageGroups = groups.slice(pageStart, pageStart + PAGE_SIZE);
+
+    btnPrev.disabled = currentPage === 0;
+    btnNext.disabled = currentPage >= totalPages - 1;
+    pageInfo.textContent = totalGroups > PAGE_SIZE
+      ? `Page ${currentPage + 1} of ${totalPages} (GOV objects ${pageStart + 1}–${pageStart + pageGroups.length} of ${totalGroups})`
+      : "";
 
     if (groups.length === 0) {
       tbody.innerHTML = `<tr><td colspan="6" class="empty">No candidates match the current filter.</td></tr>`;
@@ -170,7 +207,7 @@
     }
 
     const htmlParts = [];
-    groups.forEach((g, gi) => {
+    pageGroups.forEach((g, gi) => {
       const shade = gi % 2 === 0 ? "" : " style='background:#f8f8ff'";
       const govUrl = `https://gov.genealogy.net/item/show/${g.meta.gov_id}`;
       const multi  = g.cands.length > 1;
