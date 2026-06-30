@@ -13,8 +13,10 @@ Finds reciprocal links between [GOV](https://gov.genealogy.net) building objects
 ## Setup
 
 ```bash
-pip install sentence-transformers requests
+pip install sentence-transformers requests pywikibot pytest
 ```
+
+Run unit tests with `pytest`.
 
 The Wikidata building-type QID list (`wd_building_types.json`) is committed to the repo. To regenerate it from a [Domus](https://github.com/dstraub/domus) checkout:
 

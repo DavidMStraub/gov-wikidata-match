@@ -11,3 +11,8 @@ openapi.json
 
 # Secrets
 .env
+
+# pywikibot runtime state
+apicache/
+*.lwp
+throttle.ctrl
