@@ -70,3 +70,12 @@ Both raw and scored files are JSON arrays. Each entry:
 ```
 
 The scored file adds `score` (cosine similarity, 0–1) and sorts candidates by score descending. Raw files omit `score` and sort by distance.
+
+## GOV write access
+
+GOV has a separate SOAP write API (`ChangeService`, WSDL at `https://gov.genealogy.net/services/ChangeService?wsdl`) with operations `saveObject`, `saveSource`, `merge`. None of this is implemented yet — this section documents what's needed when it is, so the SOAP details don't have to be rediscovered.
+
+- **Auth**: every write operation takes `username` + `password` as trailing parameters (no separate API-key field exists in the schema). Credentials live in `.env` (gitignored) as `GOV_USERNAME` and `GOV_API_KEY`; `GOV_API_KEY` is used as the `password` value.
+- **Transport**: RPC/literal SOAP (`soap:binding style="rpc"`), `POST` to `https://gov.genealogy.net/services/ChangeService` with `Content-Type: text/xml; charset=utf-8` and an empty `SOAPAction` header.
+- **`object` element field order** (per the WSDL's `tns:object` complexType — SOAP RPC/literal is order-sensitive): `position`, `external-reference`, `url`, `name`, `type`, `population`, `postal-code`, `w-number`, `denomination`, `municipal-id`, `area`, `households`, `buildings`, `part-of`, `located-in`, `represents`, `note`. The `id` and `last-modification` are attributes on the `object` element itself (`GovItem` base type).
+- **Read counterpart**: `GET https://gov.genealogy.net/api/getObject?itemId={id}` returns the current object as JSON — use this to build the full `object` XML before calling `saveObject` (the write API expects the complete object, not a partial patch).

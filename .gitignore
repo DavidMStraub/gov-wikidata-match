@@ -8,3 +8,6 @@ data/
 
 # Downloaded API spec
 openapi.json
+
+# Secrets
+.env
