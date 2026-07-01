@@ -60,6 +60,7 @@ Both raw and scored files are JSON arrays. Each entry:
     {
       "qid": "Q41244449",
       "label": "Katholische Pfarrkirche Sankt Joseph",
+      "alt_labels": ["St.-Josefs-Kirche", "Pfarrkirche St. Josef"],
       "type_qids": ["Q16970"],
       "type_labels": ["Kirchengebäude"],
       "lat": 48.48172,

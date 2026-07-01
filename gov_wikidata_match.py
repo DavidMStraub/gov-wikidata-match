@@ -89,9 +89,12 @@ def _gov_texts(gov: GovBuilding) -> list[str]:
     return [f"{n.replace('/', ' ')} ({type_str})".strip() for n in gov.names]
 
 
-def _wd_text(candidate: dict) -> str:
+def _wd_texts(candidate: dict) -> list[str]:
+    """One comparison string per WD label/alias — mirrors _gov_texts so aliases
+    get the same chance to match as the primary (wikibase:label-selected) label."""
     type_str = " ".join(candidate.get("type_labels", []))
-    return f"{candidate['label']} ({type_str})".strip()
+    names = [candidate["label"], *candidate.get("alt_labels", [])]
+    return [f"{n} ({type_str})".strip() for n in names if n]
 
 
 def score_candidate(
@@ -99,14 +102,15 @@ def score_candidate(
     candidate: dict,
     gov_embs: np.ndarray | None = None,
 ) -> float:
-    """Cosine similarity between GOV query embedding and WD passage embedding."""
+    """Cosine similarity between GOV query embedding and WD passage embedding,
+    maximized over every GOV name x every WD label/alias pair."""
     model = _get_model()
-    wd_emb = model.encode([_wd_text(candidate)],
-                          convert_to_numpy=True, normalize_embeddings=True)[0]
+    wd_embs = model.encode(_wd_texts(candidate),
+                           convert_to_numpy=True, normalize_embeddings=True)
     if gov_embs is None:
         gov_embs = model.encode(_gov_texts(gov),
                                 convert_to_numpy=True, normalize_embeddings=True)
-    return round(float(np.max(gov_embs @ wd_emb)), 3)
+    return round(float(np.max(gov_embs @ wd_embs.T)), 3)
 
 
 # ---------------------------------------------------------------------------
@@ -243,8 +247,10 @@ def _dist_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return math.sqrt(dlat * dlat + dlon * dlon)
 
 
+_WD_LABEL_LANGS = "de,en,mul"  # 'mul' = label shared across all languages (no de/en translation)
+
 _WD_BOX_QUERY = """\
-SELECT ?item ?itemLabel ?type ?typeLabel ?coord WHERE {{
+SELECT ?item ?itemLabel ?type ?typeLabel ?coord ?altLabel WHERE {{
   SERVICE wikibase:box {{
     ?item wdt:P625 ?coord .
     bd:serviceParam wikibase:cornerSouthWest "Point({lon0} {lat0})"^^geo:wktLiteral .
@@ -252,10 +258,14 @@ SELECT ?item ?itemLabel ?type ?typeLabel ?coord WHERE {{
   }}
   ?item wdt:P31 ?type .
   FILTER NOT EXISTS {{ ?item wdt:P2503 ?gov . }}
-  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "de,en" . }}
+  OPTIONAL {{
+    ?item skos:altLabel ?altLabel .
+    FILTER(LANG(?altLabel) IN ("de", "en", "mul"))
+  }}
+  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "{label_langs}" . }}
 }}
 LIMIT 10000
-"""
+""".replace("{label_langs}", _WD_LABEL_LANGS)
 
 
 def _fetch_wd_tile(lat0: float, lat1: float, lon0: float, lon1: float) -> list[dict]:
@@ -290,17 +300,23 @@ def _fetch_wd_tile(lat0: float, lat1: float, lon0: float, lon1: float) -> list[d
 
         if qid not in by_qid:
             by_qid[qid] = {
-                "qid":   qid,
-                "label": row.get("itemLabel", {}).get("value", ""),
-                "lat":   wlat,
-                "lon":   wlon,
-                "types": set(),
+                "qid":       qid,
+                "label":     row.get("itemLabel", {}).get("value", ""),
+                "lat":       wlat,
+                "lon":       wlon,
+                "types":     set(),
+                "alt_labels": set(),
             }
         if type_qid:
             by_qid[qid]["types"].add((type_qid, type_label))
+        alt = row.get("altLabel", {}).get("value", "")
+        if alt:
+            by_qid[qid]["alt_labels"].add(alt)
 
     for item in by_qid.values():
         item["types"] = list(item["types"])
+        # drop alt_labels already captured as the primary label (wikibase:label pick)
+        item["alt_labels"] = sorted(item["alt_labels"] - {item["label"]})
     return list(by_qid.values())
 
 
@@ -383,6 +399,7 @@ def find_candidates_in_memory(
                 candidates.append({
                     "qid":         wd["qid"],
                     "label":       wd["label"],
+                    "alt_labels":  wd.get("alt_labels", []),
                     "type_qids":   sorted(q for q, _ in building_types),
                     "type_labels": [l for _, l in building_types if l],
                     "lat":         wd["lat"],

@@ -274,7 +274,7 @@ def test_run_writes_skip_and_limit_slice_the_filtered_matches(monkeypatch):
     monkeypatch.setattr(gov_write, "wikidata_gov_ids_bulk", lambda qids: {q: None for q in qids})
     monkeypatch.setattr(gov_write, "link_gov_to_wikidata", lambda gov_id, qid, dry_run: "dry-run")
     monkeypatch.setattr(gov_write, "link_wikidata_to_gov",
-                         lambda qid, gov_id, dry_run, existing: "dry-run")
+                         lambda qid, gov_id, dry_run, existing, put_throttle: "dry-run")
 
     entries = [
         ScoredEntry(gov_id=f"G{i}", gov_names=["x"], gov_types=[26], gov_lat=0.0, gov_lon=0.0,
@@ -302,7 +302,7 @@ def test_run_writes_isolates_a_failing_match_and_continues(monkeypatch):
 
     monkeypatch.setattr(gov_write, "link_gov_to_wikidata", fake_link_gov_to_wikidata)
     monkeypatch.setattr(gov_write, "link_wikidata_to_gov",
-                         lambda qid, gov_id, dry_run, existing: "linked")
+                         lambda qid, gov_id, dry_run, existing, put_throttle: "linked")
 
     entries = [
         ScoredEntry(gov_id=f"G{i}", gov_names=["x"], gov_types=[26], gov_lat=0.0, gov_lon=0.0,

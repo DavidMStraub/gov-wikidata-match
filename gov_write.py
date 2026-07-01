@@ -383,7 +383,7 @@ def link_gov_to_wikidata(item_id: str, qid: str, dry_run: bool = True) -> str:
 # Wikidata read/write
 # ---------------------------------------------------------------------------
 
-def _wikidata_site():
+def _wikidata_site(put_throttle: float | None = None):
     """Log into Wikidata with the BotPassword credentials from .env, using
     pywikibot's actual supported mechanism: a generated password file (see
     https://www.mediawiki.org/wiki/Manual:Pywikibot/BotPasswords). Passing the
@@ -391,7 +391,11 @@ def _wikidata_site():
     trigger its own fresh, password-less login internally (e.g. while fetching
     tokens or retrying a notloggedin API response), and that one falls back to
     an interactive prompt unless config.password_file is set, since that's
-    where *every* LoginManager instance looks first."""
+    where *every* LoginManager instance looks first.
+
+    put_throttle: minimum seconds between writes (default: pywikibot's 10s).
+    Safe floor without bot flag is ~5s (Wikidata: ~8 edits/min for normal users).
+    With an approved bot flag, 1–2s is typical."""
     import os
     import tempfile
 
@@ -403,6 +407,8 @@ def _wikidata_site():
         raise RuntimeError("WD_USERNAME must be 'mainuser@botname' (a BotPassword login)")
     bare_username, _, suffix = WD_USERNAME.partition("@")
 
+    if put_throttle is not None:
+        pywikibot.config.put_throttle = put_throttle
     pywikibot.config.usernames["wikidata"]["wikidata"] = bare_username
     fd, pw_path = tempfile.mkstemp(suffix=".pwfile")
     try:
@@ -469,7 +475,9 @@ def wikidata_gov_id(qid: str) -> str | None:
     return wikidata_gov_ids_bulk([qid]).get(qid)
 
 
-def link_wikidata_to_gov(qid: str, gov_id: str, dry_run: bool = True, existing: str | None = _UNSET) -> str:
+def link_wikidata_to_gov(qid: str, gov_id: str, dry_run: bool = True,
+                          existing: str | None = _UNSET,
+                          put_throttle: float | None = None) -> str:
     """Add a P2503 (GOV identifier) claim to a Wikidata item.
     No-op if that exact claim is already present. Pass `existing` (the result
     of a prior wikidata_gov_ids_bulk() lookup) to skip the read here."""
@@ -485,7 +493,7 @@ def link_wikidata_to_gov(qid: str, gov_id: str, dry_run: bool = True, existing: 
     if dry_run:
         return "dry-run"
 
-    site = _wikidata_site()
+    site = _wikidata_site(put_throttle=put_throttle)
     item = pywikibot.ItemPage(site, qid)
     item.get()
     claim = pywikibot.Claim(site, GOV_P2503)
@@ -509,6 +517,7 @@ class Candidate:
     lon: float
     distance_m: float
     score: float
+    alt_labels: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -553,10 +562,11 @@ class WriteResult:
 
 
 def write_match(entry: ScoredEntry, candidate: Candidate, dry_run: bool,
-                 existing_wd_gov_id: str | None = _UNSET) -> WriteResult:
+                 existing_wd_gov_id: str | None = _UNSET,
+                 put_throttle: float | None = None) -> WriteResult:
     gov_status = link_gov_to_wikidata(entry.gov_id, candidate.qid, dry_run=dry_run)
     wd_status = link_wikidata_to_gov(candidate.qid, entry.gov_id, dry_run=dry_run,
-                                      existing=existing_wd_gov_id)
+                                      existing=existing_wd_gov_id, put_throttle=put_throttle)
     print(f"{entry.gov_id} <-> {candidate.qid}  GOV:{gov_status}  WD:{wd_status}")
     return WriteResult(entry=entry, candidate=candidate, gov_status=gov_status, wd_status=wd_status)
 
@@ -568,6 +578,7 @@ def run_writes(
     dry_run: bool = True,
     skip: int = 0,
     limit: int | None = None,
+    put_throttle: float | None = None,
 ) -> list[WriteResult]:
     """Write every (entry, candidate) pair that passes_filters() selects.
     `skip`/`limit` slice the selected (post-filter) list, for processing a
@@ -593,7 +604,8 @@ def run_writes(
     for entry, candidate in selected:
         try:
             result = write_match(entry, candidate, dry_run=dry_run,
-                                  existing_wd_gov_id=existing_links.get(candidate.qid))
+                                  existing_wd_gov_id=existing_links.get(candidate.qid),
+                                  put_throttle=put_throttle)
         except Exception as e:
             print(f"{entry.gov_id} <-> {candidate.qid}  ERROR: {e}")
             result = WriteResult(entry=entry, candidate=candidate,

@@ -40,6 +40,9 @@ if __name__ == "__main__":
     ap.add_argument("--limit", type=int, default=None,
                      help="Process at most N filtered matches (for batching)")
     ap.add_argument("--live", action="store_true", help="Actually write (default is dry-run)")
+    ap.add_argument("--throttle", type=float, default=None,
+                     help="Seconds between Wikidata writes (default: pywikibot's 10s). "
+                          "Safe floor without bot flag: ~5s. With approved bot flag: 1-2s.")
     args = ap.parse_args()
 
     dry_run = not args.live
@@ -48,7 +51,7 @@ if __name__ == "__main__":
 
     entries = load_scored_entries(args.scored_json)
     results = run_writes(entries, passes_filters, object_id=args.object_id, dry_run=dry_run,
-                          skip=args.skip, limit=args.limit)
+                          skip=args.skip, limit=args.limit, put_throttle=args.throttle)
     print(f"\n{len(results)} match(es) processed.")
 
     newly_linked = [r for r in results if r.wd_status == "linked"]
